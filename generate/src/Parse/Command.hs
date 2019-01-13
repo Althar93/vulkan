@@ -1,71 +1,104 @@
-{-# LANGUAGE Arrows          #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE Arrows            #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 
-module Parse.Command where
+module Parse.Command
+  ( parseCommands
+  ) where
 
-import           Parse.CType
+import           Data.Either
+import           Data.Text
 import           Parse.Utils
 import           Spec.Command
 import           Text.XML.HXT.Core
 
-parseCommand :: ParseArrow XmlTree Command
-parseCommand = hasName "command" >>>
-               (extract `orElse` failA "Failed to extract command fields")
-  where extract = proc command -> do
-          proto <- onlyChildWithName "proto" -< command
+parseCommands :: IOStateArrow s XmlTree ([CommandAlias], [Command])
+parseCommands = extractFields
+  "command decls"
+  (hasName "commands")
+  (   partitionEithers
+  ^<< allChildren commandFailDiag [Left ^<< commandAlias, Right ^<< command]
+  )
 
-          cName <- getAllText <<< onlyChildWithName "name" -< proto
+commandFailDiag :: IOStateArrow s XmlTree String
+commandFailDiag = proc c -> do
+  proto <- onlyChildWithName "proto" -< c
+  name <- getAllText <<< onlyChildWithName "name" -< proto
+  returnA -< "Failed to parse command named " ++ name
 
-          cReturnType <- parseCType <<<
-            getAllText <<< processChildren (neg (hasName "name")) -< proto
+-- TODO: Handle
+commandAlias :: IOStateArrow s XmlTree CommandAlias
+commandAlias = proc c -> do
+  hasName "command" -< c
+  caName <- getAttrValue0T "name" -< c
+  caAlias <- getAttrValue0T "alias" -< c
+  caComment <- optionalAttrValueT "comment" -< c
+  returnA -< CommandAlias{..}
 
-          cParameters <- listA (parseParam <<< getChildren) -< command
+command :: IOStateArrow s XmlTree Command
+command = proc c -> do
+  hasName "command"                                                   -< c
+  -- The prototype is parsed here so that we can have a better error message
+  -- (including the command name) should things fail later
+  proto                  <- onlyChildWithName "proto"                 -< c
+  cName                  <- getAllTextT <<< onlyChildWithName "name"   -< proto
+  cReturnType            <- getAllTextT                                -< proto
+  cQueues                <- optionalCommaSepListAttrT "queues"         -< c
+  cSuccessCodes          <- optionalCommaSepListAttrT "successcodes"   -< c
+  cErrorCodes            <- optionalCommaSepListAttrT "errorcodes"     -< c
+  cRenderPass            <- optionalAttrValueT "renderpass"            -< c
+  cCommandBufferLevels   <- optionalCommaSepListAttrT "cmdbufferlevel" -< c
+  cPipeline              <- optionalCommaSepListAttrT "pipeline"       -< c
+  cComment               <- optionalAttrValueT "comment"               -< c
+  cs <- app
+     -< (allChildren (parameterFail cName) [
+          const CommandProto ^<< hasName "proto"
+        , CommandParam ^<< parameter
+        , CommandImplicitExternSyncParams ^<< implicitExternSyncParams
+        ], c)
+  let cParameters = [p | CommandParam p <- cs]
+      cImplicitExternSyncParams =
+        [p | CommandImplicitExternSyncParams ps <- cs, p <- ps]
+  returnA -< Command{..}
 
-          cImplicitExternSyncParams <- oneRequired
-            "implicit extern sync params"
-            (optional (parseIESPBlock <<< getChildren)) -< command
-
-          cQueues <- optionalCommaSepListAttr "queues" -< command
-
-          cRenderPass <- optionalAttrValue "renderpass" -< command
-
-          cCommandBufferLevels <-
-            optionalCommaSepListAttr "cmdbufferlevel" -< command
-
-          cSuccessCodes <- optionalCommaSepListAttr "successcodes" -< command
-
-          cErrorCodes <- optionalCommaSepListAttr "errorcodes" -< command
-
-          cUsage <- oneRequired "usage"
-            (optional (parseValidityBlock <<< getChildren)) -< command
-
-          returnA -< Command{..}
+data CommandListMember
+  = CommandProto -- handled separately, just here to have a return value for
+                 -- 'allChildren'
+  | CommandParam Parameter
+  | CommandImplicitExternSyncParams [Text]
 
 -- | Implicit External Sync Params
-parseIESPBlock :: ArrowXml a => a XmlTree [String]
-parseIESPBlock =
+implicitExternSyncParams :: IOStateArrow s XmlTree [Text]
+implicitExternSyncParams =
   hasName "implicitexternsyncparams" >>>
-  listA (getChildren >>> hasName "param" >>> getAllText)
+    allChildren (("Failed to parse IESP " ++) ^<< getAllText)
+    [hasName "param" >>> getAllTextT]
 
-parseParam :: ParseArrow XmlTree Parameter
-parseParam = hasName "param" >>>
-             (extract `orElse` failA "Failed to extract param fields")
-  where extract = proc param -> do
-          pName <- getAllText <<< onlyChildWithName "name" -< param
-          pType <- parseCType <<<
-                   getAllText <<< processChildren (neg (hasName "name"))
-                   -< param
-          pIsOptional <- traverseMaybeA (mapA parseBool) <<<
-                         optionalCommaSepListAttr "optional" -< param
-          pIsExternSync <-
-            fmap parseExternSync ^<< optionalAttrValue "externsync" -< param
-          pLengths <- optionalCommaSepListAttr "len" -< param
-          pNoAutoValidity <- (traverseMaybeA parseBool `orElse`
-                              failA "Failed to parse autovalidity attribute")
-                             <<< optionalAttrValue "noautovalidity" -< param
-          returnA -< Parameter{..}
+parameter :: IOStateArrow s XmlTree Parameter
+parameter = proc p -> do
+  hasName "param" -< p
+  pName <- getAllTextT <<< onlyChildWithName "name" -< p
+  pType <- getAllTextT <<< processChildren (neg (hasName "name")) -< p
+  pIsOptional <- traverseMaybeA (mapA parseBoolT) <<<
+                 optionalCommaSepListAttrT "optional" -< p
+  pIsExternSync <-
+    fmap externSync ^<< optionalAttrValueT "externsync" -< p
+  pLengths <- optionalCommaSepListAttrT "len" -< p
+  pAltLengths <- optionalCommaSepListAttrT "altlen" -< p
+  pNoAutoValidity <- (traverseMaybeA parseBool `orElse`
+                      failA "Failed to parse autovalidity attribute")
+                     <<< optionalAttrValue "noautovalidity" -< p
+  returnA -< Parameter{..}
 
-parseExternSync :: String -> ExternSync
-parseExternSync "true" = ExternSyncTrue
-parseExternSync ss     = ExternSyncParams (commaSepList ss)
+externSync :: Text -> ExternSync
+externSync "true" = ExternSyncTrue
+externSync ss     = ExternSyncParams (commaSepListT ss)
 
+parameterFail
+  :: Text
+  --- ^ Command name
+  -> IOStateArrow s XmlTree String
+parameterFail n = proc t -> do
+  name <- optional (getAttrOrChildText "name") -< t
+  returnA -< ("Failed to parse parameter of command " ++ unpack n)
+          ++ maybe "" (" named " ++) name

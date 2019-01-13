@@ -1,18 +1,18 @@
 module Spec.Enum where
 
-import           Data.Int (Int32)
+import           Data.Int  (Int32)
+import           Data.Text
 
 -- TODO: Parse the XML comments into here
-data Enum = Enum { eName      :: String
-                 , eNamespace :: Maybe String
-                 , eExpand    :: Maybe String
-                 , eComment   :: Maybe String
-                 , eElements  :: [EnumElement]
+data Enum = Enum { eName        :: Text
+                 , eComment     :: Maybe Text
+                 , eElements    :: [EnumElement]
+                 , eUnusedStart :: Maybe Text
                  }
   deriving (Show)
 
-data EnumElement = EnumElement { eeName    :: String
+data EnumElement = EnumElement { eeName    :: Text
                                , eeValue   :: !Int32
-                               , eeComment :: Maybe String
+                               , eeComment :: Maybe Text
                                }
   deriving (Show)

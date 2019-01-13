@@ -1,22 +1,26 @@
 module Spec.Command where
 
-import           Spec.Type
+import           Data.Text
 
-data Command = Command { cName                     :: String
-                       , cReturnType               :: CType
+data Command = Command { cName                     :: Text
+                       , cReturnType               :: Text
                        , cParameters               :: [Parameter]
-                       , cImplicitExternSyncParams :: Maybe [String]
-                       , cQueues                   :: Maybe [String]
-                       , cRenderPass               :: Maybe String
-                       , cCommandBufferLevels      :: Maybe [String]
-                       , cSuccessCodes             :: Maybe [String]
-                       , cErrorCodes               :: Maybe [String]
-                       , cUsage                    :: Maybe [String]
+                       , cImplicitExternSyncParams :: [Text]
+                       , cQueues                   :: Maybe [Text]
+                       , cSuccessCodes             :: Maybe [Text]
+                       , cErrorCodes               :: Maybe [Text]
+                       , cRenderPass               :: Maybe Text
+                       , cCommandBufferLevels      :: Maybe [Text]
+                       , cPipeline                 :: Maybe [Text]
+                       , cComment                  :: Maybe Text
                        }
   deriving (Show)
 
-data Parameter = Parameter { pName           :: String
-                           , pType           :: CType
+data Parameter = Parameter { pName           :: Text
+                           , pType           :: Text
+                           , pLengths        :: Maybe [Text]
+                           , pAltLengths     :: Maybe [Text]
+                           , pIsExternSync   :: Maybe ExternSync
                            , pIsOptional     :: Maybe [Bool]
                              -- ^ Values further into the list represent the
                              -- "optionality" of the types as it is
@@ -25,14 +29,17 @@ data Parameter = Parameter { pName           :: String
                              -- The pointer must be valid, but the int it
                              -- points to can have a default value (usually
                              -- zero).
-                           , pIsExternSync   :: Maybe ExternSync
-                           , pLengths        :: Maybe [String]
                            , pNoAutoValidity :: Maybe Bool
                            }
   deriving (Show)
 
 data ExternSync = ExternSyncTrue
-                | ExternSyncParams [String]
+                | ExternSyncParams [Text]
   deriving (Show)
 
-
+data CommandAlias = CommandAlias
+  { caName    :: Text
+  , caAlias   :: Text
+  , caComment :: Maybe Text
+  }
+  deriving (Show)

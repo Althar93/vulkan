@@ -1,53 +1,69 @@
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE Arrows            #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TypeApplications  #-}
 
-module Parse.Bitmask where
+module Parse.Bitmask
+  ( parseBitmask
+  ) where
 
+import           Data.Text
+import           Data.Word
 import           Parse.Utils
-import           Prelude           hiding (elem)
 import           Spec.Bitmask
 import           Text.XML.HXT.Core
 
 parseBitmask :: IOStateArrow s XmlTree Spec.Bitmask.Bitmask
 parseBitmask = hasName "enums" >>> hasAttrValue "type" (== "bitmask") >>>
-               (extract `orElse` failA "Failed to extract bitmask fields")
-  where extract = proc bitmask -> do
-          name      <- requiredAttrValue "name" -< bitmask
-          namespace <- optionalAttrValue "namespace" -< bitmask
-          comment   <- optionalAttrValue "comment" -< bitmask
-          values    <- listA (parseBitmaskValue <<< getChildren) -< bitmask
-          bitPositions <-
-                       listA (parseBitmaskBitPos <<< getChildren) -< bitmask
-          returnA -< Bitmask{ bmName = name
-                            , bmNamespace = namespace
-                            , bmComment = comment
-                            , bmValues = values
-                            , bmBitPositions = bitPositions
-                            }
+            (extract `orElse` failA "Failed to extract bitmask fields")
+  where extract = proc bm -> do
+          bmName      <- requiredAttrValueT "name" -< bm
+          bmComment   <- optionalAttrValueT "comment" -< bm
+          bms <- app -<
+            (allChildren (bitmaskElemFail bmName) [
+              AComment ^<< bitmaskComment
+            , ABitmaskValue ^<< bitmaskValue
+            , ABitmaskBitPosition ^<< bitmaskBitPos
+            ], bm)
+          let bmValues = [b | ABitmaskValue b <- bms]
+              bmBitPositions = [b | ABitmaskBitPosition b <- bms]
+          returnA -< Bitmask{..}
 
-parseBitmaskValue :: IOStateArrow s XmlTree BitmaskValue
-parseBitmaskValue = hasName "enum" >>> hasAttr "value" >>>
-                      (extract `orElse`
-                       failA "Failed to extract bitmask value fields")
-  where extract = proc elem -> do
-          name    <- requiredAttrValue "name" -< elem
-          value   <- requiredRead <<< requiredAttrValue "value" -< elem
-          comment <- optionalAttrValue "comment" -< elem
-          returnA -< BitmaskValue{ bmvName = name
-                                 , bmvValue = value
-                                 , bmvComment = comment
-                                 }
+data BitmaskListMember
+  = ABitmaskValue BitmaskValue
+  | ABitmaskBitPosition BitmaskBitPosition
+  | AComment Text
 
-parseBitmaskBitPos :: IOStateArrow s XmlTree BitmaskBitPosition
-parseBitmaskBitPos = hasName "enum" >>> hasAttr "bitpos" >>>
-                     (extract `orElse`
-                      failA "Failed to extract bitmask bitposition fields")
-  where extract = proc elem -> do
-          name    <- requiredAttrValue "name" -< elem
-          bitpos  <- requiredRead <<< requiredAttrValue "bitpos" -< elem
-          comment <- optionalAttrValue "comment" -< elem
-          returnA -< BitmaskBitPosition{ bmbpName = name
-                                       , bmbpBitPos = bitpos
-                                       , bmbpComment = comment
-                                       }
+bitmaskElemFail
+  :: Text
+  --- ^ Bitmask name
+  -> IOStateArrow s XmlTree String
+bitmaskElemFail n = proc t -> do
+  name <- optional (getAttrOrChildText "name") -< t
+  bitpos <- optional (getAttrOrChildText "bitpos") -< t
+  value <- optional (getAttrOrChildText "value") -< t
+  returnA -< ("Failed to parse value of bitmask enumeration " ++ unpack n)
+          ++ maybe "" (" named " ++) name
+          ++ maybe "" (" with value " ++) value
+          ++ maybe "" (" with bitpos " ++) bitpos
 
+bitmaskValue :: IOStateArrow s XmlTree BitmaskValue
+bitmaskValue = proc e -> do
+  hasName "enum" -< e
+  bmvName    <- requiredAttrValueT "name" -< e
+  bmvValue   <- requiredRead @Word32 <<< getAttrValue0 "value" -< e
+  bmvComment <- optionalAttrValueT "comment" -< e
+  returnA -< BitmaskValue{..}
+
+bitmaskBitPos :: IOStateArrow s XmlTree BitmaskBitPosition
+bitmaskBitPos = proc e -> do
+  hasName "enum" -< e
+  bmbpName    <- requiredAttrValueT "name" -< e
+  bmbpBitPos  <- requiredRead @Int <<< getAttrValue0 "bitpos" -< e
+  bmbpComment <- optionalAttrValueT "comment" -< e
+  returnA -< BitmaskBitPosition{..}
+
+--- | Comments which group the values (discarded at the moment)
+bitmaskComment :: IOStateArrow s XmlTree Text
+bitmaskComment = getAllTextT <<< hasName "comment"
 

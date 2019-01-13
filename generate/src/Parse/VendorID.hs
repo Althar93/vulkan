@@ -10,6 +10,7 @@ import           Spec.ExtensionTag
 import           Spec.VendorID
 import           Text.XML.HXT.Core
 
+-- TODO: refactor to use allChildren
 parseVendorIDs :: IOStateArrow s XmlTree [VendorID]
 parseVendorIDs = extractFields "VendorIDs"
                                (hasName "vendorids")
@@ -21,8 +22,8 @@ parseVendorID = extractFields "VendorID"
                               (hasName "vendorid")
                               extract
   where extract = proc vendorid -> do
-          viName <- arrF stringToExtensionTag <<<
+          viName <- required "stringToExtensionTag" stringToExtensionTag <<<
                     requiredAttrValue "name" -< vendorid
           viID <- requiredRead <<< requiredAttrValue "id" -< vendorid
-          viComment <- requiredAttrValue "comment" -< vendorid
+          viComment <- optionalAttrValue "comment" -< vendorid
           returnA -< VendorID{..}

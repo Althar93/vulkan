@@ -1,5 +1,21 @@
 # Change Log
 
+## [2.1.0.0] - 2018-04-22
+  - Expose dynamic loader from Graphics.Vulkan.Dymamic
+  - Turn on platform specific features by default
+  - Make all foreign imports unsafe
+  - Add option for enabling safe calls
+
+## [2.0.0.1] - 2018-04-21
+  - Improved documentation (links, tables, math)
+  - Use cpphs for preprocessing
+
+## [2.0.0.0] - 2018-04-20
+  - Total rewrite of the generator
+  - All extensions are in here
+  - Split into core versions
+  - Documentation on most things
+
 ## [1.7.0.0] - 2016-04-13
   - Fix struct member names containing digits being erroneously truncated
 
